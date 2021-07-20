@@ -226,7 +226,8 @@ elseif(UNIX)
 	endif()
 	if(GIO_FOUND)
 		set(libobs_PLATFORM_SOURCES ${libobs_PLATFORM_SOURCES}
-			util/platform-nix-dbus.c)
+			util/platform-nix-dbus.c
+			util/platform-nix-portal.c)
 		include_directories(${GIO_INCLUDE_DIRS})
 		add_definitions(
 			${GIO_DEFINITIONS})
@@ -334,6 +335,7 @@ set(libobs_graphics_HEADERS
 	graphics/libnsgif/libnsgif.h
 	graphics/device-exports.h
 	graphics/image-file.h
+	graphics/srgb.h
 	graphics/vec2.h
 	graphics/vec4.h
 	graphics/matrix3.h
