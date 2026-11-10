@@ -1,17 +1,19 @@
 #include <dxgi.h>
 
+#ifdef OBS_LEGACY
 #include "../d3d8-api/d3d8.h"
+#else
+#include <d3d8.h>
+#endif
 #include "graphics-hook.h"
-#include "../funchook.h"
 
-typedef HRESULT(STDMETHODCALLTYPE *reset_t)(IDirect3DDevice8 *,
-					    D3DPRESENT_PARAMETERS *);
-typedef HRESULT(STDMETHODCALLTYPE *present_t)(IDirect3DDevice8 *, CONST RECT *,
-					      CONST RECT *, HWND,
-					      CONST RGNDATA *);
+#include <detours.h>
 
-static struct func_hook present;
-static struct func_hook reset;
+typedef HRESULT(STDMETHODCALLTYPE *reset_t)(IDirect3DDevice8 *, D3DPRESENT_PARAMETERS *);
+typedef HRESULT(STDMETHODCALLTYPE *present_t)(IDirect3DDevice8 *, CONST RECT *, CONST RECT *, HWND, CONST RGNDATA *);
+
+reset_t RealReset = NULL;
+present_t RealPresent = NULL;
 
 struct d3d8_data {
 	HMODULE d3d8;
@@ -34,7 +36,7 @@ static d3d8_data data = {};
 
 static DXGI_FORMAT d3d8_to_dxgi_format(D3DFORMAT format)
 {
-	switch ((unsigned long)format) {
+	switch (format) {
 	case D3DFMT_X1R5G5B5:
 	case D3DFMT_A1R5G5B5:
 		return DXGI_FORMAT_B5G5R5A1_UNORM;
@@ -86,12 +88,14 @@ static bool d3d8_init_format_backbuffer(IDirect3DDevice8 *device)
 	D3DSURFACE_DESC desc;
 	HRESULT hr;
 
-	if (!d3d8_get_window_handle(device))
+	if (!d3d8_get_window_handle(device)) {
 		return false;
+	}
 
 	backbuffer = d3d8_get_backbuffer(device);
-	if (!backbuffer)
+	if (!backbuffer) {
 		return false;
+	}
 
 	hr = backbuffer->GetDesc(&desc);
 	backbuffer->Release();
@@ -114,8 +118,7 @@ static bool d3d8_shmem_init_buffer(IDirect3DDevice8 *device, int idx)
 {
 	HRESULT hr;
 
-	hr = device->CreateImageSurface(data.cx, data.cy, data.d3d8_format,
-					&data.copy_surfaces[idx]);
+	hr = device->CreateImageSurface(data.cx, data.cy, data.d3d8_format, &data.copy_surfaces[idx]);
 	if (FAILED(hr)) {
 		hlog_hr("d3d8_shmem_init_buffer: Failed to create surface", hr);
 		return false;
@@ -123,11 +126,9 @@ static bool d3d8_shmem_init_buffer(IDirect3DDevice8 *device, int idx)
 
 	if (idx == 0) {
 		D3DLOCKED_RECT rect;
-		hr = data.copy_surfaces[0]->LockRect(&rect, nullptr,
-						     D3DLOCK_READONLY);
+		hr = data.copy_surfaces[0]->LockRect(&rect, nullptr, D3DLOCK_READONLY);
 		if (FAILED(hr)) {
-			hlog_hr("d3d8_shmem_init_buffer: Failed to lock buffer",
-				hr);
+			hlog_hr("d3d8_shmem_init_buffer: Failed to lock buffer", hr);
 			return false;
 		}
 
@@ -145,8 +146,7 @@ static bool d3d8_shmem_init(IDirect3DDevice8 *device)
 			return false;
 		}
 	}
-	if (!capture_init_shmem(&data.shmem_info, data.window, data.cx, data.cy,
-				data.pitch, data.dxgi_format, false)) {
+	if (!capture_init_shmem(&data.shmem_info, data.window, data.cx, data.cy, data.pitch, data.dxgi_format, false)) {
 		return false;
 	}
 
@@ -160,8 +160,9 @@ static void d3d8_free()
 
 	for (size_t i = 0; i < NUM_BUFFERS; i++) {
 		if (data.copy_surfaces[i]) {
-			if (data.surface_locked[i])
+			if (data.surface_locked[i]) {
 				data.copy_surfaces[i]->UnlockRect();
+			}
 			data.copy_surfaces[i]->Release();
 		}
 	}
@@ -175,11 +176,13 @@ static void d3d8_init(IDirect3DDevice8 *device)
 {
 	data.d3d8 = get_system_module("d3d8.dll");
 
-	if (!d3d8_init_format_backbuffer(device))
+	if (!d3d8_init_format_backbuffer(device)) {
 		return;
+	}
 
-	if (!d3d8_shmem_init(device))
+	if (!d3d8_shmem_init(device)) {
 		d3d8_free();
+	}
 }
 
 static void d3d8_shmem_capture_copy(int idx)
@@ -199,8 +202,7 @@ static void d3d8_shmem_capture_copy(int idx)
 	}
 }
 
-static void d3d8_shmem_capture(IDirect3DDevice8 *device,
-			       IDirect3DSurface8 *backbuffer)
+static void d3d8_shmem_capture(IDirect3DDevice8 *device, IDirect3DSurface8 *backbuffer)
 {
 	int next_surface;
 	HRESULT hr;
@@ -233,8 +235,7 @@ static void d3d8_shmem_capture(IDirect3DDevice8 *device,
 	data.cur_surface = next_surface;
 }
 
-static void d3d8_capture(IDirect3DDevice8 *device,
-			 IDirect3DSurface8 *backbuffer)
+static void d3d8_capture(IDirect3DDevice8 *device, IDirect3DSurface8 *backbuffer)
 {
 	if (capture_should_stop()) {
 		d3d8_free();
@@ -247,20 +248,13 @@ static void d3d8_capture(IDirect3DDevice8 *device,
 	}
 }
 
-static HRESULT STDMETHODCALLTYPE hook_reset(IDirect3DDevice8 *device,
-					    D3DPRESENT_PARAMETERS *parameters)
+static HRESULT STDMETHODCALLTYPE hook_reset(IDirect3DDevice8 *device, D3DPRESENT_PARAMETERS *parameters)
 {
-	HRESULT hr;
-
-	if (capture_active())
+	if (capture_active()) {
 		d3d8_free();
+	}
 
-	unhook(&reset);
-	reset_t call = (reset_t)reset.call_addr;
-	hr = call(device, parameters);
-	rehook(&reset);
-
-	return hr;
+	return RealReset(device, parameters);
 }
 
 static bool hooked_reset = false;
@@ -269,24 +263,29 @@ static void setup_reset_hooks(IDirect3DDevice8 *device)
 {
 	uintptr_t *vtable = *(uintptr_t **)device;
 
-	hook_init(&reset, (void *)vtable[14], (void *)hook_reset,
-		  "IDirect3DDevice8::Reset");
-	rehook(&reset);
+	DetourTransactionBegin();
 
-	hooked_reset = true;
+	RealReset = (reset_t)vtable[14];
+	DetourAttach((PVOID *)&RealReset, hook_reset);
+
+	const LONG error = DetourTransactionCommit();
+	const bool success = error == NO_ERROR;
+	if (success) {
+		hlog("Hooked IDirect3DDevice8::Reset");
+		hooked_reset = true;
+	} else {
+		RealReset = nullptr;
+	}
 }
 
-static HRESULT STDMETHODCALLTYPE hook_present(IDirect3DDevice8 *device,
-					      CONST RECT *src_rect,
-					      CONST RECT *dst_rect,
-					      HWND override_window,
-					      CONST RGNDATA *dirty_region)
+static HRESULT STDMETHODCALLTYPE hook_present(IDirect3DDevice8 *device, CONST RECT *src_rect, CONST RECT *dst_rect,
+					      HWND override_window, CONST RGNDATA *dirty_region)
 {
 	IDirect3DSurface8 *backbuffer;
-	HRESULT hr;
 
-	if (!hooked_reset)
+	if (!hooked_reset) {
 		setup_reset_hooks(device);
+	}
 
 	backbuffer = d3d8_get_backbuffer(device);
 	if (backbuffer) {
@@ -294,18 +293,12 @@ static HRESULT STDMETHODCALLTYPE hook_present(IDirect3DDevice8 *device,
 		backbuffer->Release();
 	}
 
-	unhook(&present);
-	present_t call = (present_t)present.call_addr;
-	hr = call(device, src_rect, dst_rect, override_window, dirty_region);
-	rehook(&present);
-
-	return hr;
+	return RealPresent(device, src_rect, dst_rect, override_window, dirty_region);
 }
 
 typedef IDirect3D8 *(WINAPI *d3d8create_t)(UINT);
 
-static bool manually_get_d3d8_present_addr(HMODULE d3d8_module,
-					   void **present_addr)
+static bool manually_get_d3d8_present_addr(HMODULE d3d8_module, void **present_addr)
 {
 	d3d8create_t create;
 	D3DPRESENT_PARAMETERS pp;
@@ -337,10 +330,8 @@ static bool manually_get_d3d8_present_addr(HMODULE d3d8_module,
 	pp.BackBufferCount = 1;
 	pp.hDeviceWindow = dummy_window;
 
-	hr = d3d8->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL,
-				dummy_window,
-				D3DCREATE_HARDWARE_VERTEXPROCESSING, &pp,
-				&device);
+	hr = d3d8->CreateDevice(D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, dummy_window, D3DCREATE_HARDWARE_VERTEXPROCESSING,
+				&pp, &device);
 	d3d8->Release();
 
 	if (SUCCEEDED(hr)) {
@@ -369,15 +360,13 @@ bool hook_d3d8(void)
 	d3d8_size = module_size(d3d8_module);
 
 	if (global_hook_info->offsets.d3d8.present < d3d8_size) {
-		present_addr = get_offset_addr(
-			d3d8_module, global_hook_info->offsets.d3d8.present);
+		present_addr = get_offset_addr(d3d8_module, global_hook_info->offsets.d3d8.present);
 	} else {
 		if (!dummy_window) {
 			return false;
 		}
 
-		if (!manually_get_d3d8_present_addr(d3d8_module,
-						    &present_addr)) {
+		if (!manually_get_d3d8_present_addr(d3d8_module, &present_addr)) {
 			hlog("Failed to get D3D8 value");
 			return true;
 		}
@@ -388,11 +377,20 @@ bool hook_d3d8(void)
 		return true;
 	}
 
-	hook_init(&present, present_addr, (void *)hook_present,
-		  "IDirect3DDevice8::Present");
+	DetourTransactionBegin();
 
-	rehook(&present);
+	RealPresent = (present_t)present_addr;
+	DetourAttach((PVOID *)&RealPresent, hook_present);
 
-	hlog("Hooked D3D8");
-	return true;
+	const LONG error = DetourTransactionCommit();
+	const bool success = error == NO_ERROR;
+	if (success) {
+		hlog("Hooked IDirect3DDevice8::Present");
+		hlog("Hooked D3D8");
+	} else {
+		RealPresent = nullptr;
+		hlog("Failed to attach Detours hook: %ld", error);
+	}
+
+	return success;
 }

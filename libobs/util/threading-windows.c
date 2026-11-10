@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 Hugh Bailey <obs.jim@gmail.com>
+ * Copyright (c) 2023 Lain Bailey <lain@obsproject.com>
  *
  * Permission to use, copy, modify, and distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -163,8 +163,7 @@ struct vs_threadname_info {
 };
 #pragma pack(pop)
 
-#define THREADNAME_INFO_SIZE \
-	(sizeof(struct vs_threadname_info) / sizeof(ULONG_PTR))
+#define THREADNAME_INFO_SIZE (sizeof(struct vs_threadname_info) / sizeof(ULONG_PTR))
 
 void os_set_thread_name(const char *name)
 {
@@ -183,31 +182,32 @@ void os_set_thread_name(const char *name)
 #else
 	__try {
 #endif
-		RaiseException(VC_EXCEPTION, 0, THREADNAME_INFO_SIZE,
-			       (ULONG_PTR *)&info);
+		RaiseException(VC_EXCEPTION, 0, THREADNAME_INFO_SIZE, (ULONG_PTR *)&info);
 #ifdef NO_SEH_MINGW
 	}
-	__except1{
+	__except1
+	{
 #else
 	} __except (EXCEPTION_EXECUTE_HANDLER) {
 #endif
 	}
 #endif
 
-	typedef HRESULT(WINAPI * set_thread_description_t)(HANDLE thread,
-							   PCWSTR desc);
+	const HMODULE hModule = LoadLibrary(L"KernelBase.dll");
+	if (hModule) {
+		typedef HRESULT(WINAPI * set_thread_description_t)(HANDLE, PCWSTR);
 
-	HMODULE k32 = LoadLibraryW(L"Kernel32.dll");
-	set_thread_description_t std = NULL;
-	std = (set_thread_description_t)GetProcAddress(k32,
-						       "SetThreadDescription");
-	if (std) {
-		wchar_t *wname;
-		os_utf8_to_wcs_ptr(name, 0, &wname);
+		const set_thread_description_t std =
+			(set_thread_description_t)GetProcAddress(hModule, "SetThreadDescription");
+		if (std) {
+			wchar_t *wname;
+			os_utf8_to_wcs_ptr(name, 0, &wname);
 
-		std(GetCurrentThread(), wname);
+			std(GetCurrentThread(), wname);
 
-		bfree(wname);
+			bfree(wname);
+		}
+
+		FreeLibrary(hModule);
 	}
-	FreeLibrary(k32);
 }

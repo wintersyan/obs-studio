@@ -17,16 +17,13 @@
 //  You should have received a copy of the GNU General Public License
 //  along with obs-mac-virtualcam. If not, see <http://www.gnu.org/licenses/>.
 
-#import <Foundation/Foundation.h>
-#import <CoreMediaIO/CMIOHardwarePlugIn.h>
-
 #import "OBSDALObjectStore.h"
 #import "OBSDALMachClient.h"
 #import "OBSDALStream.h"
 
-#define kTestCardWidthKey @"obs-mac-virtualcam-test-card-width"
+#define kTestCardWidthKey  @"obs-mac-virtualcam-test-card-width"
 #define kTestCardHeightKey @"obs-mac-virtualcam-test-card-height"
-#define kTestCardFPSKey @"obs-mac-virtualcam-test-card-fps"
+#define kTestCardFPSKey    @"obs-mac-virtualcam-test-card-fps"
 
 NS_ASSUME_NONNULL_BEGIN
 
